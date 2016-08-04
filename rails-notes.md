@@ -360,6 +360,412 @@ common fields...
 
 # phone fields
  <%= f.telephone_field :mobile %>
+```
 
+**`div_for`**
+
+Creates a div with custom id for each element in a collection
+
+
+## Rails mailers
+
+`$ rails g mailer ZombieMailer decomp_change lost_brain` generates the following
 
 ```
+create    app/mailers/zombie_mailer.rb
+invoke    erb
+create    app/views/zombie_mailer
+create    app/views/zombie_mailer/decomp_change.text.erb
+create    app/views/zombie_mailer/lost_brain.text.erb
+```
+
+This creates two emails
+
+The Mailer Model is where the information from the database is collected for use in the email.
+Example:
+
+```ruby
+class ZombieMailer < ActionMailer::Base
+  default from: "from@example.com"
+  def decomp_change(zombie)
+    @zombie = zombie
+    @last_tweet = @zombie.tweets.last
+    attachments['z.pdf'] = File.read("#{Rails.root}/public/zombie.pdf")
+    mail to: @zombie.email,
+    subject: 'Your decomp stage has changed'
+    # other defaults
+    # from: my@email.com
+    # cc: my@email.com
+    # bcc: my@email.com
+    # reply_to: my@email.com
+
+  end
+...
+end
+```
+**Sending the Email**
+
+In the model that corisponds to the email, call the mailer
+
+```ruby
+class Zombie < ActiveRecord::Base
+  after_save :decomp_change_notification, if: :decomp_changed?
+private
+  def decomp_change_notification
+    ZombieMailer.decomp_change(self).deliver
+  end
+end
+```
+`_changed?` is a built in helper method to detect if property changed
+
+## Custom renders
+
+Based on the status you may want to direct to two different views.  This is done like so.
+
+```ruby
+class ZombiesController < ApplicationController
+  def show
+    @zombie = Zombie.find(params[:id])
+    respond_to do |format|
+      format.html do
+        if @zombie.decomp == 'Dead (again)'
+          render :dead_again
+        end
+        # defaults to show page
+      end
+      format.json { render json: @zombie }
+    end
+  end
+end
+```
+
+For only JSON responses include status
+```ruby
+class ZombiesController < ApplicationController
+  def show
+    @zombie = Zombie.find(params[:id])
+    render json: @zombie, status: :ok #ok is default
+  end
+end
+
+# other statuses
+#   render json: @zombie.errors, status: :unprocessable_entity
+#   render json: @zombie, status: :created, location: @zombie
+#
+#   :unauthorized #401
+#   :processing   #102
+#   :not_found    #404
+```
+
+## Rails Ajax Requests
+
+```html
+<% @zombies.each do |zombie| %>
+  <%= div_for zombie do %>
+    <%= link_to "Zombie #{zombie.name}", zombie %>
+    <div class="actions">
+      <%= link_to 'edit', edit_zombie_path(zombie) %>
+      <%= link_to 'delete', zombie, method: :delete, remote: true %> </div>
+  <% end %>
+<% end %>
+```
+`remote: true` sets up an ajax called
+
+In the controller add the respond to js to accept the remote call
+
+```ruby
+class ZombiesController < ApplicationController
+  def destroy
+    @zombie = Zombie.find(params[:id])
+    @zombie.destroy
+    respond_to do |format|
+      format.html { redirect_to zombies_url }
+      format.json { head :ok }
+      format.js
+    end
+  end
+end
+```
+
+in the javascript file add the handler for the event
+
+```javascript
+// app/views/zombies/destroy.js.erb
+$('#<%= dom_id(@zombie) %>').fadeOut();
+```
+
+## Rails 4 features
+
+Routing concerns allows common nested routes to be placed in concerns for use in other resources
+
+```ruby
+concern :sociable do
+  resources :comments
+  resources :categories
+  resources :tags
+end
+resources :messages, concerns: :sociable
+resources :posts,    concerns: :sociable
+resources :items,    concerns: :sociable
+```
+
+All sociable resources are nested in the other resources that call on them.
+
+**Scope Updates**
+
+```ruby
+# old syntax
+scope :sold, where(state: 'sold')
+default_scope where(state: 'available')
+
+# new syntax using procs
+scope :sold, ->{ where(state: 'sold') }
+
+# defauts take proc or block
+default_scope { where(state: 'available') }
+default_scope ->{ where(state: 'available') }
+```
+
+**`.none`**
+
+`.none` creates an empty active record relation which is useful if you want to send an bad recored through validation without erring out for no method error
+
+**`.where.not`**
+
+used for making a `!=` query
+
+**included tables query**
+
+to search a related table you must reference the table using `.references`
+```ruby
+Post.includes(:comments).
+  where("comments.name = 'foo'").references(:comments)
+
+# alternatively
+Post.includes(:comments).
+  where(comments: {name:  'foo'})
+
+```
+
+## Strong parameters
+
+**Whitelisting Parameter**
+
+when parameters are sent to the controller the params can be evaluated like so...
+
+```ruby
+def update
+user_params = params.require(:user).permit(:name)
+end
+```
+
+This requires the params to include a :user hash and within that hash only the :name key is added to user_params
+
+unpermitted params are logged and error can be raised
+
+```ruby
+# config/application.rb
+
+# add this line if you want to raise errors for unpermitted params
+
+config.action_controller.action_on_unpermitted_parameters = :raise
+```
+> For more info, check https://github.com/rails/strong_parameters
+
+Whitelisting is usually done in a private method within the controller like so...
+
+```ruby
+def create
+  @user = User.new(user_params)
+@user.save
+  redirect_to @user, notice: 'Created'
+end
+
+def update
+  @user.update(user_params)
+  redirect_to @user, notice: 'Updated'
+end
+
+private
+
+def user_params
+ params.require(:user).permit(:name) # add whatever is to be whitelisted here
+end
+
+```
+
+## Sessions
+
+
+Typically sessions set like so.
+```ruby
+# controllers/sessions_controller.rb
+
+def create
+   ...
+   session[:user_id] = user.id
+end
+
+# controllers/application_controller.rb
+
+def current_user
+  @current_user ||= User.find(session[:user_id])
+end
+helper_method :current_user
+
+```
+
+This adds secret key to cookie, but should move it to an environment variable if stored on github so the id can't be pulled out of the cookie.
+
+```ruby
+# in config/initializers/secret_token.rb
+ MyApp::Application.config.secret_key_base = '7014c379b14b6f4(...)'
+# secret key for the application created and shown here
+
+# However, it's best to Store and read the secret key from an environment variable
+# in config/initializers/secret_token.rb
+ MyApp::Application.config.secret_key_base = ENV['SECRET_KEY_BASE']
+# add 'SECRET_KEY_BASE' to environment variable lists
+```
+
+## views
+
+Collection items for Many to one relationships
+```ruby
+collection_select(:item, :owner_id, Owner.all, :id, :name)
+collection_radio_buttons(:item, :owner_id, Owner.all, :id, :name)
+collection_check_boxes(:item, :owner_id, Owner.all, :id, :name)
+```
+
+## Etag
+
+```ruby
+class ItemsController < ApplicationController
+  etag { current_user.id } # Sets etag for user id
+  etag { current_user.age } # Sets etag for user age
+  def show
+    @item = Item.find(params[:id])
+    fresh_when(@item)
+  end
+  def edit
+    @item = Item.find(params[:id])
+    fresh_when(@item)
+  end
+  def most_recent
+    @item = Item.find(params[:id])
+     fresh_when(@item)
+  end
+end
+
+# same as
+# fresh_when([@item, current_user.id, current_user.age])
+```
+
+## ActiveController::Live
+
+```ruby
+class ItemsController < ApplicationController
+  include ActionController::Live
+end
+```
+
+This allows the following to stream a message
+```ruby
+def show
+  response.headers["Content-Type"] = "text/event-stream"
+  # set before the stream
+  3.times{
+    response.stream.write "Hello, browser!\n"
+    sleep 1
+  }
+  response.stream.close #closes stream
+end
+```
+
+**Eventsource**
+
+```html
+<!-- views/owners/show.html.erb -->
+
+<ul id="items"></ul>
+
+```
+
+```javascript
+// assets/javascripts/owners.js
+$(document).ready(initialize);
+function initialize() {
+  var source = new EventSource('/items/events');
+  // connects to the path
+  source.addEventListener('message', update);
+  // calls update everytime message received
+};
+
+function update(event) {
+  var item = $('<li>').text(event.data);
+  $('#items').append(item);
+}
+```
+
+Used mainly with Redis
+
+```ruby
+def events
+  response.headers["Content-Type"] = "text/event-stream"
+  redis = Redis.new
+  redis.subscribe('item.create') do |on|
+    on.message do |event, data|
+      response.stream.write("data: #{data}\n\n")
+    end
+  end
+  response.stream.close
+end
+```
+
+**Turbolinks**
+
+updates only the body and title for each link.  However for Jquery to work, you need to add
+
+```ruby
+# gemfile
+gem 'jquery-turbolinks'
+
+# and update assets in this order
+ //= require jquery
+ //= require jquery.turbolinks
+ //= require jquery_ujs
+ //= require turbolinks
+```
+this will listen for the page load event for jquery
+
+there may be some latency so a loading message may be good to add.
+
+```
+-  views/layouts/application.html.erb
+<div id="loading">Loading...</div>
+
+- assets/stylesheets/application.css
+
+#loading {
+font-size: 24px;
+color: #9900FF;
+display:none; # hiddent
+}
+```
+in the application js
+
+```javascript
+// for slow loading it will show while it is being fetched
+$(document).on('page:fetch', function() {
+  $('#loading').show();
+});
+
+// then hide once the page changed
+$(document).on('page:change', function() {
+  $('#loading').hide();
+});
+```
+
+To force full page refresh,
+
+`<%= link_to 'Requests', requests_path, "data-no-turbolink" => true %>`
