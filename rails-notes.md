@@ -769,3 +769,68 @@ $(document).on('page:change', function() {
 To force full page refresh,
 
 `<%= link_to 'Requests', requests_path, "data-no-turbolink" => true %>`
+
+
+## Class Methods to clean up controllers
+
+```ruby
+self.class.transaction do
+  #Multiple Update calls
+end
+```
+If any of the update calls fail the transaction is rolled back to its previous state.
+
+
+## Decorators
+
+Decorator classes are used to get view logic out of models and into a Decorator class for that model.  These should go into a decorators directory which rails will load automatically
+
+## Serialization
+
+Serializers are used for creating json outside of contollers and active record models.  To use set up the gem file like so.
+
+```ruby
+gem 'active_model_serializers', github: 'rails-api/active_model_serializers' #most recent updates
+#gem 'jbuilder', '~> 1.2' (comment this out as it will conflict)
+```
+
+To create a Serializer
+
+`rails g serializer <Model name>`
+
+Create custom serializer methods.
+
+```ruby
+class ItemSerializer < ActiveModel::Serializer
+  attributes :id, :name, :url #attributes to serialize in the .to_json format
+  def url # custom method
+    item_url(object)
+  end
+end
+
+```
+
+## fine tuning
+
+Using Select in a query
+
+`items = Item.select(:id).where('due_at < ?', 2.days.from_now)` only returns the ID from the object meeting the condition.  These return active record objects.
+
+Using Pluck however only returns an array of values, so `ids = Item.where('due_at < ?', 2.days.from_now).pluck(:id)` which can help perfomance if all you need are values.  Pluck can take multiple arguments.
+
+## Configuring sensitive info for server logs.
+
+```ruby
+# in config/application.rb
+config.filter_parameters += [:password, :ssn]
+# now ssn will show [Filtered]
+```
+
+## Replacing WEBrick for production
+
+```ruby
+# in gem file
+
+gem 'puma'
+```
+Puma is faster for critical applications
